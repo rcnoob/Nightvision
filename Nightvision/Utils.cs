@@ -47,9 +47,8 @@ public class Utils
     {
         if (Globals.postProcessVolumes.TryGetValue(player, out var pp))
         {
-            if (pp != null && pp.IsValid)
-                pp.Remove();
-
+            pp.AcceptInput("Kill");
+            pp.Remove();
             Globals.postProcessVolumes.Remove(player);
         }
     }

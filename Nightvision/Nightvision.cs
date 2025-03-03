@@ -2,6 +2,7 @@ using Clientprefs.API;
 using CounterStrikeSharp.API;
 using CounterStrikeSharp.API.Core;
 using CounterStrikeSharp.API.Core.Capabilities;
+using CounterStrikeSharp.API.Modules.Memory.DynamicFunctions;
 using CounterStrikeSharp.API.Modules.Utils;
 using Microsoft.Extensions.Logging;
 
@@ -10,7 +11,7 @@ namespace Nightvision;
 public class Nightvision : BasePlugin
 {
     public override string ModuleName => "Nightvision";
-    public override string ModuleVersion => $"1.0.0";
+    public override string ModuleVersion => $"1.0.1";
     public override string ModuleAuthor => "rc https://github.com/rcnoob/";
     public override string ModuleDescription => "A CS2 nightvision plugin";
     
@@ -18,10 +19,16 @@ public class Nightvision : BasePlugin
     private IClientprefsApi ClientprefsApi;
     private int g_iCookieID = -1, g_iCookieID2 = -1;
     private Dictionary<int, Dictionary<string, string>> playerCookies = new();
+    
+    private static readonly MemoryFunctionVoid<CCSPlayerPawn, CSPlayerState> StateTransition = new(GameData.GetSignature("StateTransition"));
+    private readonly INetworkServerService networkServerService = new();
+    private readonly CSPlayerState[] _oldPlayerState = new CSPlayerState[65];
 
     public override void Load(bool hotReload)
     {
         Logger.LogInformation("[Nightvision] Loading plugin...");
+        
+        StateTransition.Hook(Hook_StateTransition, HookMode.Post);
         
         RegisterEventHandler<EventPlayerConnectFull>((@event, info) =>
         {
@@ -63,9 +70,7 @@ public class Nightvision : BasePlugin
                     continue;
                 
                 foreach (var (owner, pp) in Globals.postProcessVolumes.Where(x => x.Key != player))
-                {
                     info.TransmitEntities.Remove(pp);
-                }
             }
         });
         
@@ -185,5 +190,33 @@ public class Nightvision : BasePlugin
                 Utils.CreatePlayerPP(player);
             }
         }
+    }
+    private HookResult Hook_StateTransition(DynamicHook h)
+    {
+        var player = h.GetParam<CCSPlayerPawn>(0).OriginalController.Value;
+        var state = h.GetParam<CSPlayerState>(1);
+
+        if (player is null) return HookResult.Continue;
+
+        if (state != _oldPlayerState[player.Index])
+        {
+            if (state == CSPlayerState.STATE_OBSERVER_MODE || _oldPlayerState[player.Index] == CSPlayerState.STATE_OBSERVER_MODE)
+            {
+                ForceFullUpdate(player);
+            }
+        }
+
+        _oldPlayerState[player.Index] = state;
+
+        return HookResult.Continue;
+    }
+    private void ForceFullUpdate(CCSPlayerController? player)
+    {
+        if (player is null || !player.IsValid) return;
+
+        var networkGameServer = networkServerService.GetIGameServer();
+        networkGameServer.GetClientBySlot(player.Slot)?.ForceFullUpdate();
+
+        player.PlayerPawn.Value?.Teleport(null, player.PlayerPawn.Value.EyeAngles, null);
     }
 }
